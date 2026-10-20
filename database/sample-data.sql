@@ -1,0 +1,6 @@
+INSERT INTO departments(name,description) VALUES ('General Medicine','Demo department'),('Pediatrics','Demo department') ON CONFLICT(name) DO NOTHING;
+INSERT INTO doctors(full_name,department_id,specialization,phone,email) SELECT 'Dr. Demo One',id,'General Medicine','9000000001','doctor@example.test' FROM departments WHERE name='General Medicine' AND NOT EXISTS (SELECT 1 FROM doctors WHERE email='doctor@example.test');
+INSERT INTO nurses(full_name,department_id,phone,email) SELECT 'Nurse Demo One',id,'9000000002','nurse@example.test' FROM departments WHERE name='General Medicine' AND NOT EXISTS (SELECT 1 FROM nurses WHERE email='nurse@example.test');
+INSERT INTO patients(full_name,date_of_birth,gender,phone,email,address) SELECT 'Demo Patient','1998-01-15','Other','9000000003','patient@example.test','Fictional demo address' WHERE NOT EXISTS (SELECT 1 FROM patients WHERE email='patient@example.test');
+INSERT INTO rooms(room_number,room_type,daily_charge) VALUES ('G-101','General',500),('P-201','Private',1500),('ICU-01','ICU',3500) ON CONFLICT(room_number) DO NOTHING;
+INSERT INTO medicines(name,quantity,unit_price,expiry_date) SELECT 'Demo Medicine',50,10,'2028-12-31' WHERE NOT EXISTS (SELECT 1 FROM medicines WHERE name='Demo Medicine');
