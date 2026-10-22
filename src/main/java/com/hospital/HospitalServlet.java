@@ -56,14 +56,22 @@ public class HospitalServlet extends HttpServlet {
         for(String[] f:m.fields){String value=req.getParameter(f[0]);if(value==null||value.trim().isEmpty())continue;if(f[2].startsWith("select:")&&!Arrays.asList(f[2].substring(7).split(",")).contains(value.trim()))throw new IllegalArgumentException("Invalid value for "+f[1]+".");names.add(f[0]);vals.add("?");args.add(convert(f[0],value));}
         if(names.isEmpty())throw new IllegalArgumentException("Enter at least one field.");
         if(key.equals("bills")) validateBillAdmission(c, req);
+        if(key.equals("admissions")) validateRoomAvailable(c, req);
         String sql="INSERT INTO "+m.table+" ("+String.join(",",names)+") VALUES ("+String.join(",",vals)+")";
         if(key.equals("admissions")) c.setAutoCommit(false);
-        try(PreparedStatement ps=c.prepareStatement(sql)){for(int i=0;i<args.size();i++)ps.setObject(i+1,args.get(i));ps.executeUpdate();}
-        if(key.equals("admissions")){
-          try(PreparedStatement ps=c.prepareStatement("UPDATE patients SET status='ACTIVE' WHERE id=?")){
-            ps.setLong(1,Long.parseLong(req.getParameter("patient_id")));ps.executeUpdate();
+        try {
+          try(PreparedStatement ps=c.prepareStatement(sql)){for(int i=0;i<args.size();i++)ps.setObject(i+1,args.get(i));ps.executeUpdate();}
+          if(key.equals("admissions")){
+            try(PreparedStatement ps=c.prepareStatement("UPDATE patients SET status='ACTIVE' WHERE id=?")){
+              ps.setLong(1,Long.parseLong(req.getParameter("patient_id")));ps.executeUpdate();
+            }
+            c.commit();
           }
-          c.commit();
+        } catch(Exception e) {
+          if(key.equals("admissions")) {
+            try { c.rollback(); } catch(SQLException rollbackError) { e.addSuppressed(rollbackError); }
+          }
+          throw e;
         }
         req.getSession().setAttribute("flash","Record added successfully.");
       } else if("discharge".equals(action) && key.equals("admissions")){
@@ -108,12 +116,26 @@ public class HospitalServlet extends HttpServlet {
     }
   }
 
+  private void validateRoomAvailable(Connection c,HttpServletRequest req)throws SQLException {
+    String roomValue=req.getParameter("room_id");
+    if(roomValue==null||roomValue.isBlank()) throw new IllegalArgumentException("A room ID is required for an admission.");
+    long roomId=Long.parseLong(roomValue.trim());
+    try(PreparedStatement ps=c.prepareStatement("SELECT active FROM rooms WHERE id=?")){
+      ps.setLong(1,roomId);
+      try(ResultSet rs=ps.executeQuery()){
+        if(!rs.next()) throw new IllegalArgumentException("The selected room does not exist.");
+        if(!rs.getBoolean("active")) throw new IllegalArgumentException("The selected room is inactive and cannot be assigned.");
+      }
+    }
+  }
+
   private Object convert(String field,String value){
     String v=value.trim();
     if(Set.of("department_id","patient_id","room_id","doctor_id","admission_id","staff_id").contains(field))return Long.valueOf(v);
     if(field.equals("quantity"))return Integer.valueOf(v);
     if(Set.of("daily_charge","unit_price","amount").contains(field))return new BigDecimal(v);
     if(Set.of("date_of_birth","expiry_date","admission_date","attendance_date").contains(field))return java.sql.Date.valueOf(v);
+    if(field.equals("active"))return Boolean.valueOf(v);
     return v;
   }
 
