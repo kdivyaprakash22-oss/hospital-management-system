@@ -2,7 +2,7 @@
 
 A repaired, deployable starter based on the original legacy JSP project. It provides a dashboard and database-backed record forms for patients, departments, doctors, nurses, rooms, medicines, admissions, bills and attendance.
 
-> Educational demonstration only. Do not use real patient information or deploy as a clinical production system. Before real use, add robust role-based access control, CSRF protection, password hashing, audit logging, backups, monitoring and a security review.
+> Educational demonstration only. Do not use real patient information or deploy as a clinical production system. Before real use, add robust role-based access control, individual accounts, secure password handling, audit logging, backups, monitoring, rate limiting and a professional security review. The demo now includes CSRF tokens, HTML output escaping and baseline browser security headers, but it is still not approved for real patient data.
 
 ## Stack
 - Java 17
@@ -56,8 +56,12 @@ Open http://localhost:8080 and sign in with the configured app credentials.
 
 Free-tier availability, quotas, sleep behaviour and policies can change. This is a student/demo deployment, not a guaranteed always-on production service.
 
+## Tests and security checks
+
+The GitHub Actions workflow runs `mvn --batch-mode clean verify`, including the unit tests. The Docker build also runs Maven verification before packaging the image. Browser/database smoke tests still need to be performed against the deployed service after each meaningful change.
+
 ## Modules and limitations
-The generic module screens support listing and adding records. Admissions support a discharge action; bills support marking paid. The application intentionally avoids hard delete buttons to preserve hospital history. It is a minimal repaired foundation, not a full clinical information system. Before submission, add tests and validate every workflow against your requirements.
+The generic module screens support listing and adding records. Admissions support a discharge action; bills support marking paid. The application intentionally avoids hard delete buttons to preserve hospital history. It is a minimal repaired foundation, not a full clinical information system. Before submission, expand integration tests and validate every workflow against your requirements.
 
 ## Troubleshooting
 - `APP_PASSWORD is not configured`: add the environment variable to the hosting service and redeploy.
