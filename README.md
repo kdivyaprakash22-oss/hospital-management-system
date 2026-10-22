@@ -16,7 +16,7 @@ A repaired, deployable starter based on the original legacy JSP project. It prov
 Install JDK 17, Maven 3.9+, Git, and PostgreSQL (or create a hosted PostgreSQL database).
 
 ## 2. Create database
-Create a database named `hospital`, then run `database/schema.sql`. Optional demo data: run `database/sample-data.sql`. All records are fictional.
+Create a database named `hospital`, then run `database/schema.sql`. Optional demo data: run `database/sample-data.sql`. All records are fictional. If you already created the database before this update, run `database/migrations/001_active_admission_per_patient.sql` once. If it reports duplicate active admissions, resolve those records before retrying.
 
 ## 3. Configure local environment (PowerShell)
 Set the variables in the terminal you will use to run Docker/Tomcat:
