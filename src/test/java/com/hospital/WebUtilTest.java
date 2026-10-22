@@ -19,4 +19,15 @@ class WebUtilTest {
     void preservesOrdinaryText() {
         assertEquals("Demo Patient 123", WebUtil.escape("Demo Patient 123"));
     }
+
+    @Test
+    void escapesAmpersandsBeforeOtherCharactersWithoutDoubleEscapingGeneratedEntities() {
+        assertEquals("&amp;lt; &amp; &quot;quoted&quot;",
+            WebUtil.escape("&lt; & \"quoted\""));
+    }
+
+    @Test
+    void safelyEscapesUnicodeAndLineBreaksWithoutLosingContent() {
+        assertEquals("Divya — Demo&#x27;s\nRecord", WebUtil.escape("Divya — Demo's\nRecord"));
+    }
 }
