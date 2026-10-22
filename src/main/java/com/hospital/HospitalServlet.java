@@ -53,11 +53,18 @@ public class HospitalServlet extends HttpServlet {
     try(Connection c=Db.get()){
       if("add".equals(action)){
         List<String> names=new ArrayList<>();List<String> vals=new ArrayList<>();List<Object> args=new ArrayList<>();
-        for(String[] f:m.fields){String value=req.getParameter(f[0]);if(value==null||value.trim().isEmpty())continue; names.add(f[0]);vals.add("?");args.add(convert(f[0],value));}
+        for(String[] f:m.fields){String value=req.getParameter(f[0]);if(value==null||value.trim().isEmpty())continue;if(f[2].startsWith("select:")&&!Arrays.asList(f[2].substring(7).split(",")).contains(value.trim()))throw new IllegalArgumentException("Invalid value for "+f[1]+".");names.add(f[0]);vals.add("?");args.add(convert(f[0],value));}
         if(names.isEmpty())throw new IllegalArgumentException("Enter at least one field.");
         if(key.equals("bills")) validateBillAdmission(c, req);
         String sql="INSERT INTO "+m.table+" ("+String.join(",",names)+") VALUES ("+String.join(",",vals)+")";
+        if(key.equals("admissions")) c.setAutoCommit(false);
         try(PreparedStatement ps=c.prepareStatement(sql)){for(int i=0;i<args.size();i++)ps.setObject(i+1,args.get(i));ps.executeUpdate();}
+        if(key.equals("admissions")){
+          try(PreparedStatement ps=c.prepareStatement("UPDATE patients SET status='ACTIVE' WHERE id=?")){
+            ps.setLong(1,Long.parseLong(req.getParameter("patient_id")));ps.executeUpdate();
+          }
+          c.commit();
+        }
         req.getSession().setAttribute("flash","Record added successfully.");
       } else if("discharge".equals(action) && key.equals("admissions")){
         int id=Integer.parseInt(req.getParameter("id"));
