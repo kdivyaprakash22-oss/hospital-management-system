@@ -12,7 +12,7 @@ import java.util.*;
 public class HospitalServlet extends HttpServlet {
   private static final Map<String, Module> MODULES = new LinkedHashMap<>();
   static {
-    add("patients", "Patients", "patients", new String[][]{{"full_name","Full name","text"},{"date_of_birth","Date of birth","date"},{"gender","Gender","select:Male,Female,Other"},{"phone","Phone","text"},{"email","Email","email"},{"address","Address","text"},{"status","Status","select:ACTIVE,DISCHARGED"}}, "id,full_name,date_of_birth,gender,phone,email,address,status,created_at");
+    add("patients", "Patients", "patients", new String[][]{{"full_name","Full name","text"},{"date_of_birth","Date of birth","date"},{"gender","Gender","select:Male,Female,Other"},{"phone","Phone","text"},{"email","Email","email"},{"address","Address","text"}}, "id,full_name,date_of_birth,gender,phone,email,address,status,created_at");
     add("departments", "Departments", "departments", new String[][]{{"name","Department name","text"},{"description","Description","text"}}, "id,name,description,created_at");
     add("doctors", "Doctors", "doctors", new String[][]{{"full_name","Full name","text"},{"department_id","Department ID (optional)","number"},{"specialization","Specialization","text"},{"phone","Phone","text"},{"email","Email","email"}}, "id,full_name,department_id,specialization,phone,email,created_at");
     add("nurses", "Nurses", "nurses", new String[][]{{"full_name","Full name","text"},{"department_id","Department ID (optional)","number"},{"phone","Phone","text"},{"email","Email","email"}}, "id,full_name,department_id,phone,email,created_at");
@@ -56,7 +56,8 @@ public class HospitalServlet extends HttpServlet {
         for(String[] f:m.fields){String value=req.getParameter(f[0]);if(value==null||value.trim().isEmpty())continue;if(f[2].startsWith("select:")&&!Arrays.asList(f[2].substring(7).split(",")).contains(value.trim()))throw new IllegalArgumentException("Invalid value for "+f[1]+".");names.add(f[0]);vals.add("?");args.add(convert(f[0],value));}
         if(names.isEmpty())throw new IllegalArgumentException("Enter at least one field.");
         if(key.equals("bills")) validateBillAdmission(c, req);
-        if(key.equals("admissions")) validateRoomAvailable(c, req);
+        if(key.equals("admissions")) validateAdmission(c, req);
+        if(key.equals("attendance")) validateAttendanceStaff(c, req);
         String sql="INSERT INTO "+m.table+" ("+String.join(",",names)+") VALUES ("+String.join(",",vals)+")";
         if(key.equals("admissions")) c.setAutoCommit(false);
         try {
@@ -116,15 +117,41 @@ public class HospitalServlet extends HttpServlet {
     }
   }
 
-  private void validateRoomAvailable(Connection c,HttpServletRequest req)throws SQLException {
+  private void validateAdmission(Connection c,HttpServletRequest req)throws SQLException {
     String roomValue=req.getParameter("room_id");
+    String patientValue=req.getParameter("patient_id");
     if(roomValue==null||roomValue.isBlank()) throw new IllegalArgumentException("A room ID is required for an admission.");
+    if(patientValue==null||patientValue.isBlank()) throw new IllegalArgumentException("A patient ID is required for an admission.");
     long roomId=Long.parseLong(roomValue.trim());
+    long patientId=Long.parseLong(patientValue.trim());
     try(PreparedStatement ps=c.prepareStatement("SELECT active FROM rooms WHERE id=?")){
       ps.setLong(1,roomId);
       try(ResultSet rs=ps.executeQuery()){
         if(!rs.next()) throw new IllegalArgumentException("The selected room does not exist.");
         if(!rs.getBoolean("active")) throw new IllegalArgumentException("The selected room is inactive and cannot be assigned.");
+      }
+    }
+    try(PreparedStatement ps=c.prepareStatement("SELECT 1 FROM admissions WHERE patient_id=? AND status='ADMITTED'")){
+      ps.setLong(1,patientId);
+      try(ResultSet rs=ps.executeQuery()){
+        if(rs.next()) throw new IllegalArgumentException("This patient already has an active admission. Discharge it before creating another.");
+      }
+    }
+  }
+
+  private void validateAttendanceStaff(Connection c,HttpServletRequest req)throws SQLException {
+    String type=req.getParameter("staff_type");
+    String staffValue=req.getParameter("staff_id");
+    if(staffValue==null||staffValue.isBlank()) throw new IllegalArgumentException("A staff ID is required.");
+    long staffId=Long.parseLong(staffValue.trim());
+    String table;
+    if("DOCTOR".equals(type)) table="doctors";
+    else if("NURSE".equals(type)) table="nurses";
+    else throw new IllegalArgumentException("Choose a valid staff type.");
+    try(PreparedStatement ps=c.prepareStatement("SELECT 1 FROM "+table+" WHERE id=?")){
+      ps.setLong(1,staffId);
+      try(ResultSet rs=ps.executeQuery()){
+        if(!rs.next()) throw new IllegalArgumentException("The selected staff record does not exist.");
       }
     }
   }
