@@ -12,6 +12,8 @@ This review covers the JSP/Servlet application code, database schema, build conf
 - Makes sign-out a POST action instead of a state-changing GET.
 - Checks select-field values on the server rather than trusting browser controls.
 - Validates that a bill's patient matches the patient attached to its selected admission.
+- Prevents assigning inactive rooms, validates staff IDs against the selected attendance staff type, and prevents multiple active admissions for the same patient at application level.
+- Adds baseline browser security headers and configures Docker builds to run Maven verification instead of skipping tests.
 - Updates patient status when an admission is created or discharged, and wraps discharge-related updates in a database transaction.
 - Logs technical database/operation errors server-side while displaying a generic message to the user.
 
@@ -21,7 +23,8 @@ This review covers the JSP/Servlet application code, database schema, build conf
 - Passwords are compared as plain text from environment variables; use a proper identity provider or secure password hashing for any real application.
 - There is no login rate limiting, account lockout, audit trail, password reset flow, or multi-factor authentication.
 - There is no comprehensive automated integration test suite for database workflows.
-- Database schema constraints and application validation need further domain review, including attendance staff references, room availability rules, and clinical/business rules.
+- Existing databases must run `database/migrations/001_active_admission_per_patient.sql` to add the partial unique index that prevents concurrent duplicate active admissions. Check and resolve duplicate active admissions first.
+- More domain rules still need review, including room deactivation while occupied, medicine expiry/stock workflows, and clinical/business rules.
 - Backup/restore, monitoring, dependency scanning, privacy compliance, incident response, and a professional security review are not included.
 - Never store real patient data in this demo. Use fictional sample data only.
 
