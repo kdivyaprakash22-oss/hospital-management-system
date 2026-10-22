@@ -28,16 +28,26 @@ public class HospitalServlet extends HttpServlet {
   @Override protected void doGet(HttpServletRequest req,HttpServletResponse resp)throws ServletException,IOException {
     if (!authorized(req,resp)) return;
     String path=req.getPathInfo(); String key=(path==null||path.equals("/"))?"dashboard":path.substring(1);
-    if (key.equals("logout")){req.getSession().invalidate();resp.sendRedirect(req.getContextPath()+"/login.jsp");return;}
+    if (key.equals("logout")) { resp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED, "Sign out must use POST."); return; }
     if(key.equals("dashboard")){req.setAttribute("modules",MODULES.values());req.getRequestDispatcher("/WEB-INF/dashboard.jsp").forward(req,resp);return;}
     Module m=MODULES.get(key); if(m==null){resp.sendError(404,"Unknown module");return;}
     try(Connection c=Db.get(); Statement s=c.createStatement(); ResultSet rs=s.executeQuery("SELECT "+String.join(",",m.columns)+" FROM "+m.table+" ORDER BY id DESC LIMIT 200")){
       List<Map<String,Object>> rows=new ArrayList<>(); ResultSetMetaData md=rs.getMetaData(); while(rs.next()){Map<String,Object> row=new LinkedHashMap<>(); for(int i=1;i<=md.getColumnCount();i++){Object v=rs.getObject(i);row.put(md.getColumnLabel(i),v==null?"":v);} rows.add(row);}
       req.setAttribute("module",m);req.setAttribute("rows",rows);req.getRequestDispatcher("/WEB-INF/module.jsp").forward(req,resp);
-    }catch(SQLException e){throw new ServletException("Database query failed. Check DB_URL, credentials and database/schema.sql. Details: "+e.getMessage(),e);}
+    }catch(SQLException e){getServletContext().log("Database query failed for module "+key,e);throw new ServletException("Database query failed. Check the database configuration and schema.");}
   }
+
   @Override protected void doPost(HttpServletRequest req,HttpServletResponse resp)throws ServletException,IOException {
-    req.setCharacterEncoding("UTF-8"); if(!authorized(req,resp))return;
+    req.setCharacterEncoding("UTF-8");
+    if (!authorized(req,resp)) return;
+    if (!WebUtil.validCsrfToken(req)) { resp.sendError(HttpServletResponse.SC_FORBIDDEN, "Invalid or expired form token. Refresh the page and try again."); return; }
+    String path=req.getPathInfo();
+    if ("/logout".equals(path)) {
+      HttpSession session=req.getSession(false);
+      if(session!=null) session.invalidate();
+      resp.sendRedirect(req.getContextPath()+"/login.jsp");
+      return;
+    }
     String key=req.getParameter("module"); Module m=MODULES.get(key); if(m==null){resp.sendError(400,"Unknown module");return;}
     String action=req.getParameter("action");
     try(Connection c=Db.get()){
@@ -45,25 +55,65 @@ public class HospitalServlet extends HttpServlet {
         List<String> names=new ArrayList<>();List<String> vals=new ArrayList<>();List<Object> args=new ArrayList<>();
         for(String[] f:m.fields){String value=req.getParameter(f[0]);if(value==null||value.trim().isEmpty())continue; names.add(f[0]);vals.add("?");args.add(convert(f[0],value));}
         if(names.isEmpty())throw new IllegalArgumentException("Enter at least one field.");
+        if(key.equals("bills")) validateBillAdmission(c, req);
         String sql="INSERT INTO "+m.table+" ("+String.join(",",names)+") VALUES ("+String.join(",",vals)+")";
         try(PreparedStatement ps=c.prepareStatement(sql)){for(int i=0;i<args.size();i++)ps.setObject(i+1,args.get(i));ps.executeUpdate();}
         req.getSession().setAttribute("flash","Record added successfully.");
       } else if("discharge".equals(action) && key.equals("admissions")){
         int id=Integer.parseInt(req.getParameter("id"));
-        try(PreparedStatement ps=c.prepareStatement("UPDATE admissions SET status='DISCHARGED', discharge_date=CURRENT_DATE WHERE id=? AND status='ADMITTED'")){ps.setInt(1,id);int n=ps.executeUpdate();req.getSession().setAttribute("flash",n==1?"Admission discharged.":"No active admission found for that ID.");}
-        try(PreparedStatement ps=c.prepareStatement("UPDATE patients SET status='DISCHARGED' WHERE id=(SELECT patient_id FROM admissions WHERE id=?)")){ps.setInt(1,id);ps.executeUpdate();}
+        c.setAutoCommit(false);
+        try {
+          int changed;
+          try(PreparedStatement ps=c.prepareStatement("UPDATE admissions SET status='DISCHARGED', discharge_date=CURRENT_DATE WHERE id=? AND status='ADMITTED'")){
+            ps.setInt(1,id); changed=ps.executeUpdate();
+          }
+          if(changed==1){
+            try(PreparedStatement ps=c.prepareStatement("UPDATE patients p SET status=CASE WHEN EXISTS (SELECT 1 FROM admissions a WHERE a.patient_id=p.id AND a.status='ADMITTED') THEN 'ACTIVE' ELSE 'DISCHARGED' END WHERE p.id=(SELECT patient_id FROM admissions WHERE id=?)")){
+              ps.setInt(1,id);ps.executeUpdate();
+            }
+          }
+          c.commit();
+          req.getSession().setAttribute("flash",changed==1?"Admission discharged.":"No active admission found for that ID.");
+        } catch(Exception e) {
+          try { c.rollback(); } catch(SQLException rollbackError) { e.addSuppressed(rollbackError); }
+          throw e;
+        }
       } else if("pay".equals(action) && key.equals("bills")){
-        try(PreparedStatement ps=c.prepareStatement("UPDATE bills SET payment_status='PAID' WHERE id=?")){ps.setInt(1,Integer.parseInt(req.getParameter("id")));int n=ps.executeUpdate();req.getSession().setAttribute("flash",n==1?"Bill marked paid.":"Bill not found.");}
+        try(PreparedStatement ps=c.prepareStatement("UPDATE bills SET payment_status='PAID' WHERE id=? AND payment_status='UNPAID'")){ps.setInt(1,Integer.parseInt(req.getParameter("id")));int n=ps.executeUpdate();req.getSession().setAttribute("flash",n==1?"Bill marked paid.":"Unpaid bill not found.");}
       } else throw new IllegalArgumentException("Unsupported action.");
       resp.sendRedirect(req.getContextPath()+"/app/"+key);
-    }catch(Exception e){req.getSession().setAttribute("flash","Operation failed: "+safe(e.getMessage()));resp.sendRedirect(req.getContextPath()+"/app/"+key);}
+    }catch(Exception e){getServletContext().log("Operation failed for module "+key,e);req.getSession().setAttribute("flash","Operation failed. Check the entered values and related record IDs.");resp.sendRedirect(req.getContextPath()+"/app/"+key);}
   }
-  private Object convert(String field,String value){String v=value.trim();if(Set.of("department_id","patient_id","room_id","doctor_id","admission_id","staff_id","quantity").contains(field))return Integer.valueOf(v);if(Set.of("daily_charge","unit_price","amount").contains(field))return new BigDecimal(v);if(Set.of("date_of_birth","expiry_date","admission_date","attendance_date").contains(field))return java.sql.Date.valueOf(v);if(field.equals("active"))return Boolean.valueOf(v);return v;}
+
+  private void validateBillAdmission(Connection c,HttpServletRequest req)throws SQLException {
+    String admissionValue=req.getParameter("admission_id");
+    String patientValue=req.getParameter("patient_id");
+    if(admissionValue==null||admissionValue.isBlank()) return;
+    if(patientValue==null||patientValue.isBlank()) throw new IllegalArgumentException("A patient ID is required when linking a bill to an admission.");
+    long admissionId=Long.parseLong(admissionValue.trim());
+    long patientId=Long.parseLong(patientValue.trim());
+    try(PreparedStatement ps=c.prepareStatement("SELECT patient_id FROM admissions WHERE id=?")){
+      ps.setLong(1,admissionId);
+      try(ResultSet rs=ps.executeQuery()){
+        if(!rs.next()) throw new IllegalArgumentException("The selected admission does not exist.");
+        if(rs.getLong(1)!=patientId) throw new IllegalArgumentException("The bill patient must match the selected admission's patient.");
+      }
+    }
+  }
+
+  private Object convert(String field,String value){
+    String v=value.trim();
+    if(Set.of("department_id","patient_id","room_id","doctor_id","admission_id","staff_id").contains(field))return Long.valueOf(v);
+    if(field.equals("quantity"))return Integer.valueOf(v);
+    if(Set.of("daily_charge","unit_price","amount").contains(field))return new BigDecimal(v);
+    if(Set.of("date_of_birth","expiry_date","admission_date","attendance_date").contains(field))return java.sql.Date.valueOf(v);
+    return v;
+  }
+
   private boolean authorized(HttpServletRequest req,HttpServletResponse resp)throws IOException{
     HttpSession s=req.getSession(); if(Boolean.TRUE.equals(s.getAttribute("loggedIn")))return true;
-    String user=System.getenv().getOrDefault("APP_USERNAME","admin");String pass=System.getenv("APP_PASSWORD");
+    String pass=System.getenv("APP_PASSWORD");
     if(pass==null||pass.isBlank()){resp.sendError(503,"APP_PASSWORD is not configured. Set APP_USERNAME and APP_PASSWORD in hosting environment variables.");return false;}
     resp.sendRedirect(req.getContextPath()+"/login.jsp");return false;
   }
-  private String safe(String s){if(s==null)return "Unknown error";return s.length()>180?s.substring(0,180):s;}
 }
